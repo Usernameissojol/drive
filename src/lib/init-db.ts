@@ -2,19 +2,36 @@ import mysql from 'mysql2/promise';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function initDb() {
-  // First, connect without a database selected to ensure the DB exists
-  const connection = await mysql.createConnection({
-    host: process.env.MYSQL_HOST,
-    user: process.env.MYSQL_USER,
-    password: process.env.MYSQL_PASSWORD,
-  });
+  const dbName = process.env.MYSQL_DATABASE || 'drivestudio';
+  let connection;
 
   try {
-    const dbName = process.env.MYSQL_DATABASE || 'drivestudio';
-    
-    // Create database if it doesn't exist
-    await connection.query(`CREATE DATABASE IF NOT EXISTS ${dbName}`);
-    await connection.query(`USE ${dbName}`);
+    // Try connecting directly with the database selected first (standard for shared hosts like Hostinger)
+    connection = await mysql.createConnection({
+      host: process.env.MYSQL_HOST,
+      user: process.env.MYSQL_USER,
+      password: process.env.MYSQL_PASSWORD,
+      database: dbName,
+    });
+    console.log(`Connected directly to database "${dbName}"`);
+  } catch (err: any) {
+    // If connection with database fails (e.g. database doesn't exist yet), connect without database to create it
+    console.log(`Could not connect directly to database "${dbName}" (${err.message}). Attempting connection without database...`);
+    try {
+      connection = await mysql.createConnection({
+        host: process.env.MYSQL_HOST,
+        user: process.env.MYSQL_USER,
+        password: process.env.MYSQL_PASSWORD,
+      });
+      await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+      await connection.query(`USE \`${dbName}\``);
+    } catch (innerErr: any) {
+      console.error('Failed to initialize database connection:', innerErr);
+      throw innerErr;
+    }
+  }
+
+  try {
 
     // Create tables
     await connection.query(`

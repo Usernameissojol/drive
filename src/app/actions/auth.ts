@@ -5,35 +5,40 @@ import pool from "@/lib/db";
 import { v4 as uuidv4 } from 'uuid';
 
 export async function login(formData: FormData, requireAdmin: boolean = false) {
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
+  try {
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
 
-  const [rows]: any = await pool.execute(
-    'SELECT * FROM users WHERE email = ? AND password = ?',
-    [email, password]
-  );
+    const [rows]: any = await pool.execute(
+      'SELECT * FROM users WHERE email = ? AND password = ?',
+      [email, password]
+    );
 
-  if (rows.length > 0) {
-    const user = rows[0];
+    if (rows.length > 0) {
+      const user = rows[0];
 
-    if (requireAdmin && user.role !== 'admin') {
-      return { success: false, message: 'Unauthorized. Admin credentials required.' };
+      if (requireAdmin && user.role !== 'admin') {
+        return { success: false, message: 'Unauthorized. Admin credentials required.' };
+      }
+      if (!requireAdmin && user.role === 'admin') {
+        return { success: false, message: 'Admins must sign in via the Admin Console.' };
+      }
+
+      const cookieStore = await cookies();
+      cookieStore.set('auth_session', JSON.stringify({ id: user.id, name: user.name, role: user.role }), {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 60 * 60 * 24 * 7, // 1 week
+        path: '/',
+      });
+      return { success: true };
     }
-    if (!requireAdmin && user.role === 'admin') {
-      return { success: false, message: 'Admins must sign in via the Admin Console.' };
-    }
 
-    const cookieStore = await cookies();
-    cookieStore.set('auth_session', JSON.stringify({ id: user.id, name: user.name, role: user.role }), {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 60 * 60 * 24 * 7, // 1 week
-      path: '/',
-    });
-    return { success: true };
+    return { success: false, message: 'Invalid email or password' };
+  } catch (error: any) {
+    console.error("Login error:", error);
+    return { success: false, message: error.message || 'An error occurred during login' };
   }
-
-  return { success: false, message: 'Invalid email or password' };
 }
 
 export async function logout() {
@@ -42,32 +47,37 @@ export async function logout() {
 }
 
 export async function register(formData: FormData) {
-  const name = formData.get('name') as string;
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
+  try {
+    const name = formData.get('name') as string;
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
 
-  // Check if user exists
-  const [existing]: any = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
-  if (existing.length > 0) {
-    return { success: false, message: 'User already exists' };
+    // Check if user exists
+    const [existing]: any = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    if (existing.length > 0) {
+      return { success: false, message: 'User already exists' };
+    }
+
+    const id = uuidv4();
+    await pool.execute(
+      'INSERT INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)',
+      [id, name, email, password, 'user']
+    );
+
+    // Set session
+    const cookieStore = await cookies();
+    cookieStore.set('auth_session', JSON.stringify({ id, name, role: 'user' }), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 60 * 60 * 24 * 7,
+      path: '/',
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Registration error:", error);
+    return { success: false, message: error.message || 'An error occurred during registration' };
   }
-
-  const id = uuidv4();
-  await pool.execute(
-    'INSERT INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)',
-    [id, name, email, password, 'user']
-  );
-
-  // Set session
-  const cookieStore = await cookies();
-  cookieStore.set('auth_session', JSON.stringify({ id, name, role: 'user' }), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 60 * 60 * 24 * 7,
-    path: '/',
-  });
-
-  return { success: true };
 }
 
 export async function getSession() {
@@ -80,3 +90,4 @@ export async function getSession() {
     return null;
   }
 }
+
